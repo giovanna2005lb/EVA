@@ -121,6 +121,16 @@ REGRAS DO MANUAL DE ESTILO v3.1 — CHECKLIST OBRIGATÓRIO:
 - "Com efeito" confirma (NÃO é "portanto")
 - Proibido empilhar: "assim", "desse modo", "portanto", "diante do exposto" em sequência
 
+11. TEMPOS VERBAIS NO RELATÓRIO — REGRA OBRIGATÓRIA
+- Verbos que introduzem alegações, argumentos e narrativas das partes SEMPRE no presente do indicativo
+- CORRETO: alega, sustenta, destaca, acrescenta, afirma, nega, impugna, requer, argui, narra, relata, pondera, aduz, pugna, colaciona
+- ERRADO: alegou, sustentou, destacou, acrescentou, afirmou, negou, impugnou, requereu, arguiu, narrou, relatou, ponderou, aduziu, pugnou, colacionou
+- EXCEÇÃO — fatos pontuais e datados permanecem no passado:
+  Ex: "ajuizou a ação em 2022", "a decisão de ID 81152694 deferiu a gratuidade", "a requerida apresentou contestação"
+- Regra prática: verbos de fala/alegação das partes → PRESENTE; eventos processuais concretos → PASSADO
+- Exemplo de erro: "A parte autora alegou que adquiriu..." → CORRETO: "A parte autora alega que adquiriu..."
+- Exemplo de erro: "A requerida sustentou que não possui..." → CORRETO: "A requerida sustenta que não possui..."
+
 INSTRUÇÕES DE SAÍDA:
 Devolva DUAS seções separadas pelo marcador ===RELATORIO_DE_ERROS===
 
@@ -230,6 +240,47 @@ PEDIDOS_SECRETARIA_SET = {
     "registre-se", "publique-se", "expeça-se", "oficie-se",
     "notifiquem-se", "notifique-se", "arquivem-se", "arquive-se",
 }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Verbos de alegação das partes: passado → presente (usados no Relatório)
+# ──────────────────────────────────────────────────────────────────────────────
+
+VERBOS_ALEGACAO_PASSADO_PARA_PRESENTE = [
+    (r'\balegou\b', 'alega'),
+    (r'\bsustentou\b', 'sustenta'),
+    (r'\bdestacou\b', 'destaca'),
+    (r'\bacrescentou\b', 'acrescenta'),
+    (r'\bafirmou\b', 'afirma'),
+    (r'\barguiu\b', 'argui'),
+    (r'\bargüiu\b', 'argui'),
+    (r'\bnegou\b', 'nega'),
+    (r'\bimpugnou\b', 'impugna'),
+    (r'\brequereu\b', 'requer'),
+    (r'\bpediu\b', 'pede'),
+    (r'\bnarrou\b', 'narra'),
+    (r'\brelatou\b', 'relata'),
+    (r'\bponderou\b', 'pondera'),
+    (r'\baduziu\b', 'aduz'),
+    (r'\bpugnou\b', 'pugna'),
+    (r'\bcolacionou\b', 'colaciona'),
+    (r'\bponderoU\b', 'pondera'),
+    (r'\basseverou\b', 'assevera'),
+    (r'\bdefendeu\b', 'defende'),
+    (r'\bpostulou\b', 'postula'),
+    (r'\bpleiteou\b', 'pleiteia'),
+    (r'\bexplicou\b', 'explica'),
+    (r'\besclareceu\b', 'esclarece'),
+    (r'\binformou\b', 'informa'),
+]
+
+# Verbos de EVENTO PROCESSUAL CONCRETO — NÃO converter (ficam no passado)
+EVENTOS_PROCESSUAIS_CONCRETOS = re.compile(
+    r'\b(ajuizou|distribuiu|deferiu|indeferiu|juntou|protocolou|'
+    r'apresentou|interpôs|recorreu|proferiu|determinou|designou|'
+    r'homologou|extinguiu|condenou|absolveu|decretou|citou|intimou|'
+    r'penhorou|bloqueou|liberou|remeteu|encaminhou|certificou)\b',
+    re.IGNORECASE
+)
 
 
 def limpar_markdown(texto: str) -> str:
@@ -398,6 +449,64 @@ def corrigir_voz_passiva_fundamentacao(texto: str) -> str:
     return '\n'.join(resultado)
 
 
+def corrigir_verbos_relatorio(texto: str) -> str:
+    """
+    No trecho do Relatório (seção 1), converte verbos de alegação das partes
+    do pretérito perfeito para o presente do indicativo.
+    Preserva verbos de eventos processuais concretos (ex: ajuizou, deferiu, apresentou).
+
+    Estratégia linha a linha:
+    - Só atua dentro da seção 1. RELATÓRIO
+    - Para cada linha, verifica se ela contém APENAS verbos de evento concreto
+      como predicado principal — se sim, não converte.
+    - Caso contrário, aplica as substituições de alegação.
+    """
+    linhas = texto.split('\n')
+    resultado = []
+    em_relatorio = False
+
+    for linha in linhas:
+        stripped = linha.strip()
+
+        # Detecta início da seção Relatório
+        if re.match(r'^1\.?\s*\.?\s*RELATÓRIO', stripped, re.IGNORECASE):
+            em_relatorio = True
+            resultado.append(linha)
+            continue
+
+        # Detecta fim da seção Relatório
+        if re.search(r'É o relatório\.?\s*Decido\.', stripped, re.IGNORECASE):
+            em_relatorio = False
+            resultado.append(linha)
+            continue
+        if re.match(r'^2\.?\s*\.?\s*FUNDAMENTAÇÃO', stripped, re.IGNORECASE):
+            em_relatorio = False
+            resultado.append(linha)
+            continue
+
+        if em_relatorio and stripped:
+            linha_c = linha
+
+            # Só converte se a linha NÃO for dominada por evento processual concreto
+            # (heurística: se começa com sujeito processual + verbo concreto, não mexe)
+            eh_evento_concreto = bool(re.match(
+                r'^(?:A\s+(?:decisão|sentença|decisão\s+de\s+ID|r\.?\s*)?|'
+                r'O\s+(?:juízo|magistrado|feito|processo)|'
+                r'Os\s+autos|As\s+partes\s+foram)\s+\w+',
+                stripped, re.IGNORECASE
+            ) and EVENTOS_PROCESSUAIS_CONCRETOS.search(stripped))
+
+            if not eh_evento_concreto:
+                for padrao, sub in VERBOS_ALEGACAO_PASSADO_PARA_PRESENTE:
+                    linha_c = re.sub(padrao, sub, linha_c, flags=re.IGNORECASE)
+
+            resultado.append(linha_c)
+        else:
+            resultado.append(linha)
+
+    return '\n'.join(resultado)
+
+
 def simplificar_comandos_secretaria(texto: str) -> str:
     subs = [
         (r'Proceda-se\s+às?\s+anotaç(?:ão|ões)\s+e\s+registros?\s+necessári[oa]s?\s+'
@@ -433,10 +542,11 @@ def corrigir_concordancia_sujeito_posposto(texto: str) -> str:
 
 
 def pipeline_pos_processamento(texto: str) -> str:
-    """Aplica todas as redes de segurança em sequência (ordem igual ao revisor v3.0)."""
+    """Aplica todas as redes de segurança em sequência."""
     texto = limpar_markdown(texto)
     texto = corrigir_infinitivos_dispositivo(texto)
     texto = estruturar_dispositivo_simples(texto)
+    texto = corrigir_verbos_relatorio(texto)               # ← NOVO: tempos verbais no Relatório
     texto = corrigir_voz_passiva_fundamentacao(texto)
     texto = simplificar_comandos_secretaria(texto)
     texto = corrigir_concordancia_sujeito_posposto(texto)
@@ -479,7 +589,6 @@ def criar_docx_revisado(texto: str) -> bytes:
             continue
 
         para = doc.add_paragraph()
-        # Split por verbos decisórios: pares = texto normal, ímpares = verbos (negrito)
         partes = PADRAO_VERBOS_NEGRITO.split(linha)
         for i, parte in enumerate(partes):
             if not parte:
@@ -665,7 +774,6 @@ def revisar_minuta(texto: str, prompt_sistema: str) -> tuple[str, str]:
     """
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        # Tenta carregar do config.txt (compatibilidade com uso local)
         config_path = BASE_DIR / "config.txt"
         if config_path.exists():
             for linha in config_path.read_text(encoding="utf-8").splitlines():
@@ -773,7 +881,6 @@ async def upload_manual(arquivo: UploadFile = File(...)):
     if not texto.strip():
         raise HTTPException(400, "Não foi possível extrair texto do arquivo.")
 
-    # Remove manual anterior
     for f in MANUAL_DIR.iterdir():
         f.unlink()
 
@@ -808,25 +915,21 @@ async def formatar(arquivos: list[UploadFile] = File(...)):
       - REVISADO_{nome}.docx   → minuta corrigida com formatação da Vara
       - RELATORIO_{nome}.docx  → relatório de erros individual
       - CONSOLIDADO.docx       → resumo de todo o lote
-
-    O campo 'download_url' na resposta aponta para GET /api/download/{job_id}.
     """
     if not arquivos:
         raise HTTPException(400, "Nenhum arquivo enviado.")
 
-    # Valida todos antes de começar
     for arq in arquivos:
         ext = Path(arq.filename).suffix.lower()
         if ext not in EXTENSOES_ACEITAS:
             raise HTTPException(400, f"'{arq.filename}': formato '{ext}' não suportado.")
 
-    # Carrega manual (customizado ou padrão) e monta prompt
     manual_usuario = obter_manual_usuario()
     prompt_sistema = montar_prompt_sistema(manual_usuario)
 
     job_id = str(uuid.uuid4())
     resultados = []
-    arquivos_zip = {}  # nome_no_zip → bytes
+    arquivos_zip = {}
 
     for idx, arq in enumerate(arquivos):
         dados = await arq.read()
@@ -844,13 +947,9 @@ async def formatar(arquivos: list[UploadFile] = File(...)):
                 resultados.append({"arquivo": nome, "status": "erro", "detalhe": "Arquivo muito curto.", "total_erros": 0})
                 continue
 
-            # Chama a API
             texto_revisado, erros_texto = revisar_minuta(texto_original, prompt_sistema)
-
-            # Pós-processamento
             texto_revisado = pipeline_pos_processamento(texto_revisado)
 
-            # Gera .docx
             bytes_revisado = criar_docx_revisado(texto_revisado)
             bytes_relatorio, total_erros = criar_docx_relatorio(nome, erros_texto)
 
@@ -869,22 +968,18 @@ async def formatar(arquivos: list[UploadFile] = File(...)):
         except Exception as e:
             resultados.append({"arquivo": nome, "status": "erro", "detalhe": str(e), "total_erros": -1, "erros_texto": ""})
 
-        # Pausa entre chamadas (rate limit)
         if idx < len(arquivos) - 1:
             time.sleep(PAUSA_ENTRE_CHAMADAS)
 
-    # Relatório consolidado
     bytes_consolidado = criar_docx_consolidado(resultados)
     arquivos_zip[f"CONSOLIDADO_{datetime.now().strftime('%Y%m%d_%H%M')}.docx"] = bytes_consolidado
 
-    # Empacota tudo num ZIP
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for nome_arq, conteudo in arquivos_zip.items():
             zf.writestr(nome_arq, conteudo)
     zip_buf.seek(0)
 
-    # Salva o ZIP para download posterior
     zip_path = OUTPUT_DIR / f"{job_id}.zip"
     zip_path.write_bytes(zip_buf.getvalue())
 
@@ -910,10 +1005,7 @@ async def formatar(arquivos: list[UploadFile] = File(...)):
 
 @app.get("/api/download/{job_id}")
 def download(job_id: str):
-    """
-    Baixa o ZIP com todos os documentos gerados pelo job.
-    O nome do arquivo no download é EVA_Revisao_{data}.zip.
-    """
+    """Baixa o ZIP com todos os documentos gerados pelo job."""
     zip_path = OUTPUT_DIR / f"{job_id}.zip"
     if not zip_path.exists():
         raise HTTPException(404, "Arquivo não encontrado. O job pode ter expirado — refaça a formatação.")
@@ -924,5 +1016,6 @@ def download(job_id: str):
         media_type="application/zip",
         filename=nome_download,
     )
+
 from fastapi.staticfiles import StaticFiles
 app.mount("/", StaticFiles(directory=str(BASE_DIR / "frontend"), html=True), name="frontend")
